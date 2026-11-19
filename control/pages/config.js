@@ -1,1 +1,1 @@
-window.APP_CONFIG={API_BASE:"https://superset-control.YOUR-SUBDOMAIN.workers.dev"};
+window.APP_CONFIG={API_BASE:"https://superset-control.harveymoeid.workers.dev"};
