@@ -39,23 +39,53 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p state
-          # Use "completed" (not "success"): a session stopped via Stop Superset
-          # is cancelled by design, so its run conclusion is "cancelled", not
-          # "success" — but its cleanup step still uploads the state artifact
-          # (if: always()). Filtering on "success" only would silently skip
-          # that state forever and rotate secret_key/admin_password every run.
-          PREVIOUS_RUN="$(gh run list --workflow superset-on-demand.yml --status completed --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          if [ -n "$PREVIOUS_RUN" ]; then
-            echo "Restoring state from previous run $PREVIOUS_RUN."
-            gh run download "$PREVIOUS_RUN" --name superset-state --dir state || echo "No prior state artifact found; starting fresh."
-          else
-            echo "No previous run; starting fresh."
+          # A completed run can be cancelled intentionally by Stop Superset.
+          # Search recent completed runs until one actually contains our artifact;
+          # a newer failed run may have ended before the upload step.
+          mapfile -t PREVIOUS_RUNS < <(
+            gh run list --workflow superset-on-demand.yml --status completed --limit 20 \
+              --json databaseId --jq '.[].databaseId'
+          )
+          RESTORED=false
+          for PREVIOUS_RUN in "${PREVIOUS_RUNS[@]}"; do
+            [ -n "$PREVIOUS_RUN" ] || continue
+            TEMP_STATE="$(mktemp -d)"
+            if gh run download "$PREVIOUS_RUN" --name superset-state --dir "$TEMP_STATE" >/dev/null 2>&1 \
+              && find "$TEMP_STATE" -type f -print -quit | grep -q .; then
+              cp -a "$TEMP_STATE"/. state/
+              echo "Restored state from completed run $PREVIOUS_RUN."
+              RESTORED=true
+              rm -rf "$TEMP_STATE"
+              break
+            fi
+            rm -rf "$TEMP_STATE"
+          done
+          if [ "$RESTORED" != true ]; then
+            echo "No previous state artifact found in the 20 most recent completed runs."
           fi
+
+      - name: Validate session inputs
+        env:
+          ACCESS_EMAIL: ${{ inputs.access_email }}
+          SESSION_MINUTES: ${{ inputs.session_minutes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ACCESS_EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || [ "${#ACCESS_EMAIL}" -gt 254 ]; then
+            echo "Invalid access email."
+            exit 1
+          fi
+          case "$SESSION_MINUTES" in
+            30|60|120|180) ;;
+            *) echo "Invalid session duration."; exit 1 ;;
+          esac
 
       - name: Create persistent local secrets if missing
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p state
           if [ ! -s state/secret_key ]; then
             openssl rand -hex 48 > state/secret_key
@@ -72,6 +102,7 @@ jobs:
       - name: Start Superset
         shell: bash
         run: |
+          set -euo pipefail
           docker compose config --quiet
           docker compose up -d
           for attempt in $(seq 1 60); do
@@ -85,11 +116,15 @@ jobs:
           exit 1
 
       - name: Start temporary HTTPS tunnel and publish access details
+        env:
+          ACCESS_EMAIL: ${{ inputs.access_email }}
+          SESSION_MINUTES: ${{ inputs.session_minutes }}
         shell: bash
         run: |
+          set -euo pipefail
           curl --fail --location --silent --show-error https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 --output cloudflared
           chmod +x cloudflared
-          ./cloudflared tunnel --url http://127.0.0.1:8088 --allowed-mail "${{ inputs.access_email }}" --no-autoupdate > cloudflared.log 2>&1 &
+          ./cloudflared tunnel --url http://127.0.0.1:8088 --allowed-mail "$ACCESS_EMAIL" --no-autoupdate > cloudflared.log 2>&1 &
           echo $! > cloudflared.pid
 
           URL=""
@@ -110,17 +145,19 @@ jobs:
             echo "- URL: $URL"
             echo "- Username: `admin`"
             echo "- Password: `$(cat state/admin_password)`"
-            echo "- Email gate: enabled for ${{ inputs.access_email }}"
-            echo "- Session duration: ${{ inputs.session_minutes }} minutes"
+            echo "- Email gate: enabled for $ACCESS_EMAIL"
+            echo "- Session duration: $SESSION_MINUTES minutes"
             echo
-            echo "**Security:** this temporary URL is publicly routable. Keep it and the password private."
+            echo "**Security:** this temporary URL is publicly routable but protected by email OTP. Keep it and the password private."
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo "Superset URL: $URL"
 
       - name: Keep session online
+        env:
+          SESSION_MINUTES: ${{ inputs.session_minutes }}
         shell: bash
-        run: sleep "$((${{ inputs.session_minutes }} * 60))"
+        run: sleep "$((SESSION_MINUTES * 60))"
 
       - name: Stop tunnel and Superset
         if: always()
