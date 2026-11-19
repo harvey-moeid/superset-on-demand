@@ -79,6 +79,22 @@ jobs:
             echo "SUPERSET_ADMIN_PASSWORD=$(cat state/admin_password)"
           } >> "$GITHUB_ENV"
 
+      - name: Prepare writable Superset metadata directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p state/superset_home
+          # Migrate legacy SQLite files while preserving WAL/SHM sidecars.
+          for suffix in "" "-wal" "-shm"; do
+            if [ -f "state/superset.db$suffix" ] && [ ! -e "state/superset_home/superset.db$suffix" ]; then
+              mv "state/superset.db$suffix" "state/superset_home/superset.db$suffix"
+            fi
+          done
+          # Superset image uses UID 1000; its mounted metadata directory must be writable.
+          sudo chown -R 1000:1000 state/superset_home
+          sudo chmod 700 state/superset_home
+          stat -c 'Superset metadata directory: %U:%G mode=%a path=%n' state/superset_home
+
       - name: Start Superset
         shell: bash
         run: |
@@ -92,7 +108,8 @@ jobs:
             fi
             sleep 5
           done
-          docker compose logs --no-color
+          echo "Superset failed to become healthy. Recent container logs:"
+          docker compose logs --no-color --tail=200
           exit 1
 
       - name: Start temporary HTTPS tunnel and publish access details
@@ -138,6 +155,9 @@ jobs:
         run: |
           if [ -f cloudflared.pid ]; then kill "$(cat cloudflared.pid)" 2>/dev/null || true; fi
           docker compose down --remove-orphans || true
+          if [ -d state/superset_home ]; then
+            sudo chown -R "$(id -u):$(id -g)" state/superset_home || true
+          fi
 
       - name: Save private state for the next session
         if: always()
