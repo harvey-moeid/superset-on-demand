@@ -1,0 +1,129 @@
+name: Superset On-Demand
+
+on:
+  workflow_dispatch:
+    inputs:
+      session_minutes:
+        description: "How long should Superset stay online?"
+        required: true
+        type: choice
+        options:
+          - "30"
+          - "60"
+          - "120"
+          - "180"
+        default: "60"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: superset-on-demand
+  cancel-in-progress: false
+
+jobs:
+  superset:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Restore previous private state artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p state
+          PREVIOUS_RUN="$(gh run list --workflow superset-on-demand.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -n "$PREVIOUS_RUN" ]; then
+            echo "Restoring state from previous successful run."
+            gh run download "$PREVIOUS_RUN" --name superset-state --dir state || echo "No prior state artifact found; starting fresh."
+          else
+            echo "No previous successful run; starting fresh."
+          fi
+
+      - name: Create persistent local secrets if missing
+        shell: bash
+        run: |
+          mkdir -p state
+          if [ ! -s state/secret_key ]; then
+            openssl rand -hex 48 > state/secret_key
+          fi
+          if [ ! -s state/admin_password ]; then
+            openssl rand -hex 24 > state/admin_password
+          fi
+          chmod 600 state/secret_key state/admin_password
+          {
+            echo "SUPERSET_SECRET_KEY=$(cat state/secret_key)"
+            echo "SUPERSET_ADMIN_PASSWORD=$(cat state/admin_password)"
+          } >> "$GITHUB_ENV"
+
+      - name: Start Superset
+        shell: bash
+        run: |
+          docker compose config --quiet
+          docker compose up -d
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8088/health >/dev/null; then
+              echo "Superset is healthy."
+              exit 0
+            fi
+            sleep 5
+          done
+          docker compose logs --no-color
+          exit 1
+
+      - name: Start temporary HTTPS tunnel and publish access details
+        shell: bash
+        run: |
+          curl --fail --location --silent --show-error https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 --output cloudflared
+          chmod +x cloudflared
+          ./cloudflared tunnel --url http://127.0.0.1:8088 --no-autoupdate > cloudflared.log 2>&1 &
+          echo $! > cloudflared.pid
+
+          URL=""
+          for attempt in $(seq 1 60); do
+            URL="$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' cloudflared.log | head -n 1 || true)"
+            if [ -n "$URL" ]; then break; fi
+            sleep 5
+          done
+
+          if [ -z "$URL" ]; then
+            cat cloudflared.log
+            exit 1
+          fi
+
+          {
+            echo "## Superset is ready"
+            echo
+            echo "- URL: $URL"
+            echo "- Username: `admin`"
+            echo "- Password: `$(cat state/admin_password)`"
+            echo "- Session duration: ${{ inputs.session_minutes }} minutes"
+            echo
+            echo "**Security:** this temporary URL is publicly routable. Keep it and the password private."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Superset URL: $URL"
+
+      - name: Keep session online
+        shell: bash
+        run: sleep "$((${{ inputs.session_minutes }} * 60))"
+
+      - name: Stop tunnel and Superset
+        if: always()
+        shell: bash
+        run: |
+          if [ -f cloudflared.pid ]; then kill "$(cat cloudflared.pid)" 2>/dev/null || true; fi
+          docker compose down --remove-orphans || true
+
+      - name: Save private state for the next session
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: superset-state
+          path: state/
+          if-no-files-found: warn
+          retention-days: 90

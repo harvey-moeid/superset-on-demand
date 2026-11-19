@@ -1,0 +1,26 @@
+name: Validate Superset On-Demand
+
+on:
+  push:
+    paths:
+      - "docker-compose.yml"
+      - "superset_config.py"
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - "docker-compose.yml"
+      - "superset_config.py"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+      - name: Validate Python config syntax
+        run: python3 -m py_compile superset_config.py
