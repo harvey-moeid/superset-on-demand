@@ -1,0 +1,1 @@
+window.APP_CONFIG={API_BASE:"https://superset-control.YOUR-SUBDOMAIN.workers.dev"};
