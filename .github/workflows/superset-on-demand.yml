@@ -133,16 +133,18 @@ jobs:
             sleep 5
           done
           if [ -z "$URL" ]; then cat cloudflared.log; exit 1; fi
+          PASSWORD="$(cat state/admin_password)"
           {
             echo "## Superset is ready"
             echo
             echo "- URL: $URL"
-            echo "- Username: `admin`"
-            echo "- Password: `$(cat state/admin_password)`"
+            echo '- Username: `admin`'
+            printf '%s\n' "- Password: \`${PASSWORD}\`"
             echo "- Session duration: $SESSION_MINUTES minutes"
             echo
             echo "**Security:** the temporary URL is publicly reachable. Access is protected by the Superset admin login only. Keep the URL and password private."
           } >> "$GITHUB_STEP_SUMMARY"
+          unset PASSWORD
           echo "Superset URL: $URL"
 
       - name: Keep session online
