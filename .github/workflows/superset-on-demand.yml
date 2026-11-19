@@ -34,18 +34,23 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Restore previous private state artifact
+      - name: Restore previous state artifact
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           mkdir -p state
-          PREVIOUS_RUN="$(gh run list --workflow superset-on-demand.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          # Use "completed" (not "success"): a session stopped via Stop Superset
+          # is cancelled by design, so its run conclusion is "cancelled", not
+          # "success" — but its cleanup step still uploads the state artifact
+          # (if: always()). Filtering on "success" only would silently skip
+          # that state forever and rotate secret_key/admin_password every run.
+          PREVIOUS_RUN="$(gh run list --workflow superset-on-demand.yml --status completed --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
           if [ -n "$PREVIOUS_RUN" ]; then
-            echo "Restoring state from previous successful run."
+            echo "Restoring state from previous run $PREVIOUS_RUN."
             gh run download "$PREVIOUS_RUN" --name superset-state --dir state || echo "No prior state artifact found; starting fresh."
           else
-            echo "No previous successful run; starting fresh."
+            echo "No previous run; starting fresh."
           fi
 
       - name: Create persistent local secrets if missing
