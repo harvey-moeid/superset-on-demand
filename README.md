@@ -7,6 +7,9 @@ Personal Superset sandbox. GitHub Actions runs the container only for manually s
 - GitHub Actions: ephemeral runner hosting Docker Superset + temporary Cloudflare Quick Tunnel.
 - GitHub Actions artifact: SQLite metadata and Superset keys, retained 90 days.
 
+## Access model
+No email address or email OTP is required. The control panel requires the dashboard bearer token. Superset itself requires the generated admin username and password shown in the private GitHub Actions workflow summary. The temporary Quick Tunnel URL is publicly reachable, so keep both the URL and admin password private.
+
 ## Required GitHub Actions repository secrets
 - CLOUDFLARE_API_TOKEN: scoped token with Workers Scripts:Edit and Cloudflare Pages:Edit.
 - CLOUDFLARE_ACCOUNT_ID: Cloudflare account ID.
@@ -22,4 +25,4 @@ Personal Superset sandbox. GitHub Actions runs the container only for manually s
 6. Open Pages URL and enter SUPERSET_DASHBOARD_TOKEN.
 
 ## Security and limitations
-Keep this repo private. Actions artifacts contain Superset metadata, SECRET_KEY and admin password. Quick Tunnel URL and admin credentials appear in private workflow summary. SQLite + 90-day artifacts are prototype-grade, not production persistence. GitHub Actions is not 24/7 hosting. Data warehouse, Redis/Celery, alerts and scheduled reports are not configured.
+Keep this repo private. Actions artifacts contain Superset metadata, SECRET_KEY and admin password. Workflow summaries contain the temporary tunnel URL and admin credentials. SQLite + 90-day artifacts are prototype-grade, not production persistence. GitHub Actions is not 24/7 hosting. Data warehouse, Redis/Celery, alerts and scheduled reports are not configured.

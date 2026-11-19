@@ -27,6 +27,9 @@ jobs:
           node --check control/worker/src/index.js
           node --check control/pages/app.js
           node --check control/pages/config.js
+      - name: Test Worker API security and behavior
+        working-directory: control/worker
+        run: npm test
       - name: Validate Wrangler Worker configuration
         working-directory: control/worker
         run: npx --yes wrangler@4 deploy --dry-run --outdir /tmp/superset-worker-dry-run
