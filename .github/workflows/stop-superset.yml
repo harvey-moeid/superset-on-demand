@@ -1,0 +1,28 @@
+name: Stop Superset
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  stop:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Cancel active Superset session
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          RUNS="$(gh run list --workflow superset-on-demand.yml --status in_progress --json databaseId --jq '.[].databaseId')"
+          if [ -z "$RUNS" ]; then
+            echo "No active Superset session found."
+            exit 0
+          fi
+          while IFS= read -r RUN_ID; do
+            [ -n "$RUN_ID" ] || continue
+            echo "Cancelling Superset run $RUN_ID"
+            gh run cancel "$RUN_ID" || true
+          done <<< "$RUNS"
+          echo "Stop request sent. GitHub Actions will run cleanup steps."
