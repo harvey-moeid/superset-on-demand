@@ -1,0 +1,22 @@
+name: Deploy Superset Control Plane
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: control/worker
+          command: deploy
+          secrets: |
+            DASHBOARD_TOKEN
+            GITHUB_TOKEN
+        env:
+          DASHBOARD_TOKEN: ${{ secrets.SUPERSET_DASHBOARD_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.SUPERSET_GITHUB_TOKEN }}

@@ -1,0 +1,7 @@
+name = "superset-control"
+main = "src/index.js"
+compatibility_date = "2026-11-19"
+workers_dev = true
+[vars]
+GITHUB_REPOSITORY = "harvey-moeid/superset-on-demand"
+ALLOWED_ORIGINS = "https://superset-on-demand.pages.dev"
