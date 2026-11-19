@@ -66,18 +66,38 @@ jobs:
             *) echo "Invalid session duration."; exit 1 ;;
           esac
 
-      - name: Create persistent local secrets if missing
+      - name: Create and mask session credentials
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p state
           if [ ! -s state/secret_key ]; then openssl rand -hex 48 > state/secret_key; fi
-          if [ ! -s state/admin_password ]; then openssl rand -hex 24 > state/admin_password; fi
+          # Rotate the admin password on every run to invalidate credentials from older logs.
+          openssl rand -hex 24 > state/admin_password
           chmod 600 state/secret_key state/admin_password
+          SECRET_KEY="$(cat state/secret_key)"
+          ADMIN_PASSWORD="$(cat state/admin_password)"
+          echo "::add-mask::$SECRET_KEY"
+          echo "::add-mask::$ADMIN_PASSWORD"
           {
-            echo "SUPERSET_SECRET_KEY=$(cat state/secret_key)"
-            echo "SUPERSET_ADMIN_PASSWORD=$(cat state/admin_password)"
+            echo "SUPERSET_SECRET_KEY=$SECRET_KEY"
+            echo "SUPERSET_ADMIN_PASSWORD=$ADMIN_PASSWORD"
           } >> "$GITHUB_ENV"
+          unset SECRET_KEY ADMIN_PASSWORD
+
+      - name: Prepare writable Superset metadata directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p state/superset_home
+          for suffix in "" "-wal" "-shm"; do
+            if [ -f "state/superset.db$suffix" ] && [ ! -e "state/superset_home/superset.db$suffix" ]; then
+              mv "state/superset.db$suffix" "state/superset_home/superset.db$suffix"
+            fi
+          done
+          sudo chown -R 1000:1000 state/superset_home
+          sudo chmod 700 state/superset_home
+          stat -c 'Superset metadata directory: %U:%G mode=%a path=%n' state/superset_home
 
       - name: Start Superset
         shell: bash
@@ -92,7 +112,8 @@ jobs:
             fi
             sleep 5
           done
-          docker compose logs --no-color
+          echo "Superset failed to become healthy. Recent container logs:"
+          docker compose logs --no-color --tail=200
           exit 1
 
       - name: Start temporary HTTPS tunnel and publish access details
@@ -105,7 +126,6 @@ jobs:
           chmod +x cloudflared
           ./cloudflared tunnel --url http://127.0.0.1:8088 --no-autoupdate > cloudflared.log 2>&1 &
           echo $! > cloudflared.pid
-
           URL=""
           for attempt in $(seq 1 60); do
             URL="$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' cloudflared.log | head -n 1 || true)"
@@ -113,7 +133,6 @@ jobs:
             sleep 5
           done
           if [ -z "$URL" ]; then cat cloudflared.log; exit 1; fi
-
           {
             echo "## Superset is ready"
             echo
@@ -138,6 +157,9 @@ jobs:
         run: |
           if [ -f cloudflared.pid ]; then kill "$(cat cloudflared.pid)" 2>/dev/null || true; fi
           docker compose down --remove-orphans || true
+          if [ -d state/superset_home ]; then
+            sudo chown -R "$(id -u):$(id -g)" state/superset_home || true
+          fi
 
       - name: Save private state for the next session
         if: always()

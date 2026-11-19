@@ -10,7 +10,7 @@ services:
       SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:?SUPERSET_SECRET_KEY is required}
       SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:?SUPERSET_ADMIN_PASSWORD is required}
     volumes:
-      - ./state:/app/superset_home
+      - ./state/superset_home:/app/superset_home
       - ./superset_config.py:/app/pythonpath/superset_config.py:ro
     command:
       - /bin/bash
