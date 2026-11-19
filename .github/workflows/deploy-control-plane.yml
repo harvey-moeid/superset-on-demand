@@ -17,6 +17,12 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: control/worker
           command: deploy
+      - name: Set Worker secrets
+        working-directory: control/worker
+        shell: bash
         env:
           DASHBOARD_TOKEN: ${{ secrets.SUPERSET_DASHBOARD_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.SUPERSET_GITHUB_TOKEN }}
+          SUPERSET_GITHUB_TOKEN: ${{ secrets.SUPERSET_GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$DASHBOARD_TOKEN" | npx --yes wrangler@4 secret put DASHBOARD_TOKEN
+          printf '%s' "$SUPERSET_GITHUB_TOKEN" | npx --yes wrangler@4 secret put GITHUB_TOKEN
