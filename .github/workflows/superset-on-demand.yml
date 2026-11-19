@@ -3,19 +3,11 @@ name: Superset On-Demand
 on:
   workflow_dispatch:
     inputs:
-      access_email:
-        description: "Email address allowed through the temporary Cloudflare access gate"
-        required: true
-        type: string
       session_minutes:
         description: "How long should Superset stay online?"
         required: true
         type: choice
-        options:
-          - "30"
-          - "60"
-          - "120"
-          - "180"
+        options: ["30", "60", "120", "180"]
         default: "60"
 
 permissions:
@@ -41,9 +33,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p state
-          # A completed run can be cancelled intentionally by Stop Superset.
-          # Search recent completed runs until one actually contains our artifact;
-          # a newer failed run may have ended before the upload step.
           mapfile -t PREVIOUS_RUNS < <(
             gh run list --workflow superset-on-demand.yml --status completed --limit 20 \
               --json databaseId --jq '.[].databaseId'
@@ -66,17 +55,12 @@ jobs:
             echo "No previous state artifact found in the 20 most recent completed runs."
           fi
 
-      - name: Validate session inputs
+      - name: Validate session duration
         env:
-          ACCESS_EMAIL: ${{ inputs.access_email }}
           SESSION_MINUTES: ${{ inputs.session_minutes }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! "$ACCESS_EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || [ "${#ACCESS_EMAIL}" -gt 254 ]; then
-            echo "Invalid access email."
-            exit 1
-          fi
           case "$SESSION_MINUTES" in
             30|60|120|180) ;;
             *) echo "Invalid session duration."; exit 1 ;;
@@ -87,12 +71,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p state
-          if [ ! -s state/secret_key ]; then
-            openssl rand -hex 48 > state/secret_key
-          fi
-          if [ ! -s state/admin_password ]; then
-            openssl rand -hex 24 > state/admin_password
-          fi
+          if [ ! -s state/secret_key ]; then openssl rand -hex 48 > state/secret_key; fi
+          if [ ! -s state/admin_password ]; then openssl rand -hex 24 > state/admin_password; fi
           chmod 600 state/secret_key state/admin_password
           {
             echo "SUPERSET_SECRET_KEY=$(cat state/secret_key)"
@@ -117,14 +97,13 @@ jobs:
 
       - name: Start temporary HTTPS tunnel and publish access details
         env:
-          ACCESS_EMAIL: ${{ inputs.access_email }}
           SESSION_MINUTES: ${{ inputs.session_minutes }}
         shell: bash
         run: |
           set -euo pipefail
           curl --fail --location --silent --show-error https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 --output cloudflared
           chmod +x cloudflared
-          ./cloudflared tunnel --url http://127.0.0.1:8088 --allowed-mail "$ACCESS_EMAIL" --no-autoupdate > cloudflared.log 2>&1 &
+          ./cloudflared tunnel --url http://127.0.0.1:8088 --no-autoupdate > cloudflared.log 2>&1 &
           echo $! > cloudflared.pid
 
           URL=""
@@ -133,11 +112,7 @@ jobs:
             if [ -n "$URL" ]; then break; fi
             sleep 5
           done
-
-          if [ -z "$URL" ]; then
-            cat cloudflared.log
-            exit 1
-          fi
+          if [ -z "$URL" ]; then cat cloudflared.log; exit 1; fi
 
           {
             echo "## Superset is ready"
@@ -145,12 +120,10 @@ jobs:
             echo "- URL: $URL"
             echo "- Username: `admin`"
             echo "- Password: `$(cat state/admin_password)`"
-            echo "- Email gate: enabled for $ACCESS_EMAIL"
             echo "- Session duration: $SESSION_MINUTES minutes"
             echo
-            echo "**Security:** this temporary URL is publicly routable but protected by email OTP. Keep it and the password private."
+            echo "**Security:** the temporary URL is publicly reachable. Access is protected by the Superset admin login only. Keep the URL and password private."
           } >> "$GITHUB_STEP_SUMMARY"
-
           echo "Superset URL: $URL"
 
       - name: Keep session online
