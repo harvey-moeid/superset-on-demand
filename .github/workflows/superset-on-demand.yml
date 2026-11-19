@@ -3,6 +3,10 @@ name: Superset On-Demand
 on:
   workflow_dispatch:
     inputs:
+      access_email:
+        description: "Email address allowed through the temporary Cloudflare access gate"
+        required: true
+        type: string
       session_minutes:
         description: "How long should Superset stay online?"
         required: true
@@ -80,7 +84,7 @@ jobs:
         run: |
           curl --fail --location --silent --show-error https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 --output cloudflared
           chmod +x cloudflared
-          ./cloudflared tunnel --url http://127.0.0.1:8088 --no-autoupdate > cloudflared.log 2>&1 &
+          ./cloudflared tunnel --url http://127.0.0.1:8088 --allowed-mail "${{ inputs.access_email }}" --no-autoupdate > cloudflared.log 2>&1 &
           echo $! > cloudflared.pid
 
           URL=""
@@ -101,6 +105,7 @@ jobs:
             echo "- URL: $URL"
             echo "- Username: `admin`"
             echo "- Password: `$(cat state/admin_password)`"
+            echo "- Email gate: enabled for ${{ inputs.access_email }}"
             echo "- Session duration: ${{ inputs.session_minutes }} minutes"
             echo
             echo "**Security:** this temporary URL is publicly routable. Keep it and the password private."
