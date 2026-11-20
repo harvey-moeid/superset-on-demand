@@ -5,6 +5,7 @@ on:
 
 permissions:
   actions: write
+  contents: read
 
 jobs:
   stop:
@@ -13,10 +14,18 @@ jobs:
       - name: Cancel active Superset session
         env:
           GH_TOKEN: ${{ github.token }}
+          # Job ini tidak melakukan checkout, jadi gh tidak punya konteks git.
+          # GH_REPO memberi tahu gh repo mana yang dipakai.
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
-          RUNS="$(gh run list --workflow superset-on-demand.yml --status in_progress --json databaseId --jq '.[].databaseId')"
-          if [ -z "$RUNS" ]; then
+          set -euo pipefail
+          RUNS=""
+          for STATUS in in_progress queued; do
+            FOUND="$(gh run list --workflow superset-on-demand.yml --status "$STATUS" --json databaseId --jq '.[].databaseId')"
+            if [ -n "$FOUND" ]; then RUNS="$RUNS$FOUND"$'\n'; fi
+          done
+          if [ -z "${RUNS//[$'\n ']/}" ]; then
             echo "No active Superset session found."
             exit 0
           fi
