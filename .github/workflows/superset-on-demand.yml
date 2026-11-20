@@ -117,6 +117,7 @@ jobs:
           exit 1
 
       - name: Start temporary HTTPS tunnel and publish access details
+        id: tunnel
         env:
           SESSION_MINUTES: ${{ inputs.session_minutes }}
         shell: bash
@@ -145,7 +146,24 @@ jobs:
             echo "**Security:** the temporary URL is publicly reachable. Access is protected by the Superset admin login only. Keep the URL and password private."
           } >> "$GITHUB_STEP_SUMMARY"
           unset PASSWORD
+          # Subdomain saja (bukan password) dipakai sebagai nama artifact agar panel bisa membacanya.
+          SUBDOMAIN="${URL#https://}"
+          SUBDOMAIN="${SUBDOMAIN%.trycloudflare.com}"
+          echo "subdomain=$SUBDOMAIN" >> "$GITHUB_OUTPUT"
           echo "Superset URL: $URL"
+
+      - name: Publish tunnel marker for the control panel
+        shell: bash
+        env:
+          SUBDOMAIN: ${{ steps.tunnel.outputs.subdomain }}
+        run: echo "$SUBDOMAIN" > tunnel-marker.txt
+
+      - name: Upload tunnel marker
+        uses: actions/upload-artifact@v4
+        with:
+          name: tunnel-${{ steps.tunnel.outputs.subdomain }}
+          path: tunnel-marker.txt
+          retention-days: 1
 
       - name: Keep session online
         env:

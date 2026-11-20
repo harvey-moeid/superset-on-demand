@@ -49,7 +49,6 @@ function githubErrorMessage(error) {
 }
 
 async function github(env, path, init = {}) {
-  const { raw, ...fetchInit } = init;
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY || "")) {
     throw new Error("Worker repository configuration is invalid");
   }
@@ -57,14 +56,14 @@ async function github(env, path, init = {}) {
   let response;
   try {
     response = await fetch(`https://api.github.com/repos/${env.GITHUB_REPOSITORY}/${path}`, {
-      ...fetchInit,
+      ...init,
       headers: {
         accept: "application/vnd.github+json",
         authorization: `Bearer ${env.GITHUB_TOKEN}`,
         "x-github-api-version": "2022-11-28",
         "user-agent": "superset-control-worker",
         "content-type": "application/json",
-        ...fetchInit.headers,
+        ...init.headers,
       },
     });
   } catch (error) {
@@ -76,21 +75,19 @@ async function github(env, path, init = {}) {
     console.error("GitHub API request failed", response.status, detail.slice(0, 500));
     throw new GithubError("GitHub API request failed", response.status);
   }
-  if (raw) return response.text();
   return response.status === 204 ? null : response.json();
 }
 
-// Ambil URL Quick Tunnel dari log job yang sedang berjalan.
-// Hanya URL trycloudflare.com yang diteruskan; password tidak pernah dibaca/dikirim.
+// URL Quick Tunnel dibaca dari NAMA artifact "tunnel-<subdomain>" milik run aktif.
+// GitHub tidak mengizinkan log job yang masih berjalan dibaca lewat API (404),
+// tetapi daftar artifact bisa dibaca dengan izin Actions Read saja.
+// Hanya subdomain trycloudflare.com yang diteruskan; password tidak pernah dibaca/dikirim.
 // Kegagalan di sini tidak boleh merusak /api/status, jadi errornya ditelan.
 async function findSessionUrl(env, runId) {
   try {
-    const jobs = await github(env, `actions/runs/${runId}/jobs?per_page=5`);
-    const job = (jobs.jobs || [])[0];
-    if (!job) return "";
-    const log = await github(env, `actions/jobs/${job.id}/logs`, { raw: true });
-    const match = log.match(/Superset URL: (https:\/\/[a-z0-9-]+\.trycloudflare\.com)/);
-    return match ? match[1] : "";
+    const data = await github(env, `actions/runs/${runId}/artifacts?per_page=30`);
+    const marker = (data.artifacts || []).find((a) => !a.expired && /^tunnel-[a-z0-9-]+$/.test(a.name || ""));
+    return marker ? `https://${marker.name.slice("tunnel-".length)}.trycloudflare.com` : "";
   } catch (error) {
     console.error("Could not read session URL", error);
     return "";
