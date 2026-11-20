@@ -49,6 +49,7 @@ function githubErrorMessage(error) {
 }
 
 async function github(env, path, init = {}) {
+  const { raw, ...fetchInit } = init;
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPOSITORY || "")) {
     throw new Error("Worker repository configuration is invalid");
   }
@@ -56,14 +57,14 @@ async function github(env, path, init = {}) {
   let response;
   try {
     response = await fetch(`https://api.github.com/repos/${env.GITHUB_REPOSITORY}/${path}`, {
-      ...init,
+      ...fetchInit,
       headers: {
         accept: "application/vnd.github+json",
         authorization: `Bearer ${env.GITHUB_TOKEN}`,
         "x-github-api-version": "2022-11-28",
         "user-agent": "superset-control-worker",
         "content-type": "application/json",
-        ...init.headers,
+        ...fetchInit.headers,
       },
     });
   } catch (error) {
@@ -75,7 +76,25 @@ async function github(env, path, init = {}) {
     console.error("GitHub API request failed", response.status, detail.slice(0, 500));
     throw new GithubError("GitHub API request failed", response.status);
   }
+  if (raw) return response.text();
   return response.status === 204 ? null : response.json();
+}
+
+// Ambil URL Quick Tunnel dari log job yang sedang berjalan.
+// Hanya URL trycloudflare.com yang diteruskan; password tidak pernah dibaca/dikirim.
+// Kegagalan di sini tidak boleh merusak /api/status, jadi errornya ditelan.
+async function findSessionUrl(env, runId) {
+  try {
+    const jobs = await github(env, `actions/runs/${runId}/jobs?per_page=5`);
+    const job = (jobs.jobs || [])[0];
+    if (!job) return "";
+    const log = await github(env, `actions/jobs/${job.id}/logs`, { raw: true });
+    const match = log.match(/Superset URL: (https:\/\/[a-z0-9-]+\.trycloudflare\.com)/);
+    return match ? match[1] : "";
+  } catch (error) {
+    console.error("Could not read session URL", error);
+    return "";
+  }
 }
 
 async function readJson(request) {
@@ -122,7 +141,9 @@ export default {
           id: run.id, status: run.status, conclusion: run.conclusion, created_at: run.created_at,
           html_url: /^https:\/\/github\.com\//.test(run.html_url || "") ? run.html_url : "",
         }));
-        return send({ active: runs.find((run) => ["queued", "in_progress"].includes(run.status)) || null, runs }, 200);
+        const active = runs.find((run) => ["queued", "in_progress"].includes(run.status)) || null;
+        const session_url = active && active.status === "in_progress" ? await findSessionUrl(env, active.id) : "";
+        return send({ active, session_url, runs }, 200);
       }
 
       if (url.pathname === "/api/start" && request.method === "POST") {

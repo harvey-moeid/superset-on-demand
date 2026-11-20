@@ -14,6 +14,32 @@ async function api(path, options = {}) {
   return data;
 }
 
+function renderSessionUrl(sessionUrl, active) {
+  let box = $("session-url");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "session-url";
+    box.className = "run";
+    $("state").insertAdjacentElement("afterend", box);
+  }
+  box.replaceChildren();
+  if (sessionUrl && /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(sessionUrl)) {
+    const link = document.createElement("a");
+    link.href = sessionUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = sessionUrl;
+    box.append(document.createTextNode("URL Superset: "), link);
+    box.append(document.createElement("br"), document.createTextNode("Password admin: lihat Summary workflow di GitHub."));
+    box.hidden = false;
+  } else if (active) {
+    box.textContent = "URL belum siap, tunggu 1–2 menit lalu tekan Refresh.";
+    box.hidden = false;
+  } else {
+    box.hidden = true;
+  }
+}
+
 function renderRuns(runs) {
   const container = $("runs");
   container.replaceChildren();
@@ -39,6 +65,7 @@ function renderRuns(runs) {
 async function refresh() {
   const data = await api("/api/status");
   $("state").textContent = data.active ? "RUNNING · " + data.active.status : "STOPPED";
+  renderSessionUrl(data.session_url, data.active);
   renderRuns(data.runs || []);
 }
 function show() {
