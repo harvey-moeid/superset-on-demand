@@ -14,7 +14,7 @@ async function api(path, options = {}) {
   return data;
 }
 
-function renderSessionUrl(sessionUrl, active) {
+function renderSessionUrl(data) {
   let box = $("session-url");
   if (!box) {
     box = document.createElement("div");
@@ -23,6 +23,7 @@ function renderSessionUrl(sessionUrl, active) {
     $("state").insertAdjacentElement("afterend", box);
   }
   box.replaceChildren();
+  const sessionUrl = data.session_url;
   if (sessionUrl && /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(sessionUrl)) {
     const link = document.createElement("a");
     link.href = sessionUrl;
@@ -30,9 +31,38 @@ function renderSessionUrl(sessionUrl, active) {
     link.rel = "noopener noreferrer";
     link.textContent = sessionUrl;
     box.append(document.createTextNode("URL Superset: "), link);
-    box.append(document.createElement("br"), document.createTextNode("Password admin: lihat Summary workflow di GitHub."));
+
+    box.append(document.createElement("br"), document.createTextNode("Username: admin"));
+    const password = data.session_password;
+    if (password && /^[a-f0-9]{48}$/.test(password)) {
+      const code = document.createElement("code");
+      code.textContent = "•".repeat(12);
+      let visible = false;
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.textContent = "Tampilkan";
+      toggle.onclick = () => {
+        visible = !visible;
+        code.textContent = visible ? password : "•".repeat(12);
+        toggle.textContent = visible ? "Sembunyikan" : "Tampilkan";
+      };
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.textContent = "Salin";
+      copy.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(password);
+          copy.textContent = "Tersalin";
+        } catch { copy.textContent = "Gagal menyalin"; }
+        setTimeout(() => { copy.textContent = "Salin"; }, 1500);
+      };
+      box.append(document.createElement("br"), document.createTextNode("Password: "), code,
+        document.createTextNode(" "), toggle, document.createTextNode(" "), copy);
+    } else {
+      box.append(document.createElement("br"), document.createTextNode("Password: belum siap, tekan Refresh (atau lihat Summary workflow di GitHub)."));
+    }
     box.hidden = false;
-  } else if (active) {
+  } else if (data.active) {
     box.textContent = "URL belum siap, tunggu 1–2 menit lalu tekan Refresh.";
     box.hidden = false;
   } else {
@@ -65,7 +95,7 @@ function renderRuns(runs) {
 async function refresh() {
   const data = await api("/api/status");
   $("state").textContent = data.active ? "RUNNING · " + data.active.status : "STOPPED";
-  renderSessionUrl(data.session_url, data.active);
+  renderSessionUrl(data);
   renderRuns(data.runs || []);
 }
 function show() {
