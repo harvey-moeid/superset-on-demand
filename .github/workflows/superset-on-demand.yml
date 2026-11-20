@@ -165,6 +165,16 @@ jobs:
           path: tunnel-marker.txt
           retention-days: 1
 
+      # Atas permintaan pemilik repo: password admin ditampilkan di panel. Password dibawa
+      # lewat NAMA artifact (cred-<hex>) yang hanya bisa dibaca pemegang akses repo/token
+      # Actions Read; panel hanya menampilkannya setelah login dengan token dashboard.
+      - name: Upload credential marker
+        uses: actions/upload-artifact@v4
+        with:
+          name: cred-${{ env.SUPERSET_ADMIN_PASSWORD }}
+          path: tunnel-marker.txt
+          retention-days: 1
+
       - name: Keep session online
         env:
           SESSION_MINUTES: ${{ inputs.session_minutes }}

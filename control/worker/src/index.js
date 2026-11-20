@@ -78,19 +78,26 @@ async function github(env, path, init = {}) {
   return response.status === 204 ? null : response.json();
 }
 
-// URL Quick Tunnel dibaca dari NAMA artifact "tunnel-<subdomain>" milik run aktif.
+// URL Quick Tunnel dan password admin dibaca dari NAMA artifact milik run aktif:
+//   tunnel-<subdomain>  -> https://<subdomain>.trycloudflare.com
+//   cred-<48 hex>       -> password admin sesi ini
 // GitHub tidak mengizinkan log job yang masih berjalan dibaca lewat API (404),
 // tetapi daftar artifact bisa dibaca dengan izin Actions Read saja.
-// Hanya subdomain trycloudflare.com yang diteruskan; password tidak pernah dibaca/dikirim.
 // Kegagalan di sini tidak boleh merusak /api/status, jadi errornya ditelan.
-async function findSessionUrl(env, runId) {
+// Jangan pernah melog nilai password.
+async function findSessionInfo(env, runId) {
   try {
     const data = await github(env, `actions/runs/${runId}/artifacts?per_page=30`);
-    const marker = (data.artifacts || []).find((a) => !a.expired && /^tunnel-[a-z0-9-]+$/.test(a.name || ""));
-    return marker ? `https://${marker.name.slice("tunnel-".length)}.trycloudflare.com` : "";
+    const artifacts = (data.artifacts || []).filter((a) => !a.expired);
+    const tunnel = artifacts.find((a) => /^tunnel-[a-z0-9-]+$/.test(a.name || ""));
+    const cred = artifacts.find((a) => /^cred-[a-f0-9]{48}$/.test(a.name || ""));
+    return {
+      url: tunnel ? `https://${tunnel.name.slice("tunnel-".length)}.trycloudflare.com` : "",
+      password: cred ? cred.name.slice("cred-".length) : "",
+    };
   } catch (error) {
-    console.error("Could not read session URL", error);
-    return "";
+    console.error("Could not read session info");
+    return { url: "", password: "" };
   }
 }
 
@@ -139,8 +146,8 @@ export default {
           html_url: /^https:\/\/github\.com\//.test(run.html_url || "") ? run.html_url : "",
         }));
         const active = runs.find((run) => ["queued", "in_progress"].includes(run.status)) || null;
-        const session_url = active && active.status === "in_progress" ? await findSessionUrl(env, active.id) : "";
-        return send({ active, session_url, runs }, 200);
+        const info = active && active.status === "in_progress" ? await findSessionInfo(env, active.id) : { url: "", password: "" };
+        return send({ active, session_url: info.url, session_username: info.password ? "admin" : "", session_password: info.password, runs }, 200);
       }
 
       if (url.pathname === "/api/start" && request.method === "POST") {
