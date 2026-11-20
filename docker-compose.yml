@@ -18,6 +18,7 @@ services:
       - |
         superset db upgrade &&
         (superset fab create-admin --username admin --firstname Superset --lastname Admin --email admin@localhost --password "$$SUPERSET_ADMIN_PASSWORD" || true) &&
+        superset fab reset-password --username admin --password "$$SUPERSET_ADMIN_PASSWORD" &&
         superset init &&
         gunicorn --workers 2 --timeout 120 --bind 0.0.0.0:8088 "superset.app:create_app()"
     healthcheck:
